@@ -1,0 +1,22 @@
+{
+  "name": "mapa-de-crencas",
+  "version": "0.1.0",
+  "description": "Plataforma de estudo, comparação e compatibilidade de religiões e sistemas de crenças",
+  "main": "server/app.js",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node --no-warnings server/app.js",
+    "seed": "node --no-warnings server/seed/index.js --reset",
+    "test": "node --no-warnings --test test/*.test.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@fontsource-variable/fraunces": "^5.2.0",
+    "@fontsource-variable/inter": "^5.2.0",
+    "express": "^5.1.0",
+    "leaflet": "^1.9.4",
+    "qrcode-generator": "^1.4.4"
+  }
+}
