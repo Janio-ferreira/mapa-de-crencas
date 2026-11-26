@@ -1,0 +1,9 @@
+[
+  {
+    "entidade_tipo": "tradicao", "entidade_slug": "catolicismo", "papel": "monumento",
+    "arquivo_url": "https://commons.wikimedia.org/wiki/Special:FilePath/NOME_DO_ARQUIVO.jpg?width=900",
+    "alt": "Descreva o que a imagem mostra", "autor": "Nome do autor na página do arquivo", "licenca": "CC BY-SA 4.0",
+    "licenca_url": "https://creativecommons.org/licenses/by-sa/4.0/", "fonte_nome": "Wikimedia Commons",
+    "fonte_url": "https://commons.wikimedia.org/wiki/File:NOME_DO_ARQUIVO.jpg", "nota": "EXEMPLO: troque pelos dados reais conferidos na página do arquivo."
+  }
+]

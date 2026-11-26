@@ -8,6 +8,7 @@ const { db, DB_FILE, transaction, slugify, reindexar } = require('./lib/db');
 const compat = require('./lib/compat');
 const eixosLib = require('./lib/eixos');
 const perfilLib = require('./lib/perfil');
+const imagensLib = require('./lib/imagens');
 const questionario = require('./lib/questionario');
 const desc = require('./lib/descoberta');
 const { seed } = require('./seed');
@@ -20,6 +21,9 @@ const ERR = (status, msg) => Object.assign(new Error(msg), { status });
 function criarApp() {
   seed();
   require('./seed/aplicar_eixos').aplicar();
+  try { require('./lib/retratos_store').reimportar(); } catch (e) { console.warn('Retratos locais:', e.message); }
+  try { const r = require('./lib/pessoas').relatorio(); const sem = r.filter(x => x.status === 'nao_tentado').length;
+    if (sem) console.log(`[retratos] ${sem} de ${r.length} pessoas ainda sem retrato verificado (a sincronização tentará obtê-los quando houver internet).`); } catch { /* relatório é informativo */ }
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -101,7 +105,7 @@ function criarApp() {
       nomes_alternativos: a('SELECT nome, idioma, tipo FROM nomes_alternativos WHERE tradicao_id=?'),
       subdivisoes: a("SELECT slug, nome, categoria, situacao FROM tradicoes WHERE parent_id=? AND status_publicacao='publicado' ORDER BY nome"),
       cadeia: cadeia(t),
-      fundadores: a('SELECT f.slug, f.nome, f.descricao, f.historicidade, tf.papel, tf.nota FROM tradicao_figuras tf JOIN figuras f ON f.id=tf.figura_id WHERE tf.tradicao_id=?'),
+      fundadores: a('SELECT f.slug, f.nome, f.descricao, f.historicidade, tf.papel, tf.nota FROM tradicao_figuras tf JOIN figuras f ON f.id=tf.figura_id WHERE tf.tradicao_id=?').map(f => ({ ...f, imagem: imagensLib.retratoDeFigura(f.slug, f.nome) })),
       textos_sagrados: a('SELECT s.slug, s.nome, s.tipo, s.descricao, tt.autoridade FROM tradicao_textos tt JOIN textos_sagrados s ON s.id=tt.texto_id WHERE tt.tradicao_id=?'),
       crencas: a('SELECT titulo, descricao, centralidade FROM crencas WHERE tradicao_id=? ORDER BY centralidade DESC'),
       praticas: a('SELECT nome, tipo, descricao FROM praticas WHERE tradicao_id=?'),
@@ -111,6 +115,7 @@ function criarApp() {
       referencias: a('SELECT r.chave, r.tipo_fonte, r.autores, r.titulo, r.ano, r.editora, r.local, r.url, r.doi, r.nota, tr.escopo FROM tradicao_referencias tr JOIN referencias r ON r.id=tr.referencia_id WHERE tr.tradicao_id=? ORDER BY r.autores'),
       doutrinas: doutrinasDe(id),
       eixos: eixosDetalhados(t.slug),
+      imagens: imagensLib.imagensDe('tradicao', t.slug), simbolo: imagensLib.simboloDe(t.slug),
     };
     res.json(out);
   });
@@ -176,6 +181,7 @@ function criarApp() {
     res.json(dims.map(d => ({ ...d, opcoes: ops.filter(o => o.dim === d.chave).map(({ chave, nome, descricao }) => ({ chave, nome, descricao })) })));
   });
 
+  api.get('/imagens', (req, res) => res.json({ imagens: imagensLib.imagensDe(String(req.query.tipo || 'tradicao'), String(req.query.slug || '')), simbolo: req.query.tipo === 'tradicao' ? imagensLib.simboloDe(String(req.query.slug || '')) : null }));
   api.get('/eixos', (_req, res) => res.json({ eixos: eixosLib.definicoes(), temas: questionario.TEMAS }));
   api.get('/perfil/questionario', (_req, res) => res.json({ versao: 'v1', perguntas: questionario.perguntasPublicas(), temas: questionario.TEMAS,
     escala: ['Discordo totalmente', 'Discordo', 'Em parte / sem posição', 'Concordo', 'Concordo totalmente'], minimo: 8, recomendado: 20 }));
@@ -306,11 +312,18 @@ function criarApp() {
       (SELECT AVG(confianca) FROM doutrinas d WHERE d.tradicao_id=t.id) conf_media, t.verificacao
       FROM tradicoes t WHERE t.status_publicacao='publicado' AND t.categoria!='familia_religiosa' ORDER BY dimensoes, refs`).all()));
 
+  adm.get('/retratos/relatorio', (_req, res) => { const r = require('./lib/pessoas').relatorio(); const por = {}; r.forEach(x => { por[x.status] = (por[x.status] || 0) + 1; }); res.json({ total: r.length, por_status: por, pessoas: r }); });
+  adm.post('/retratos/sincronizar', (_req, res) => { require('../scripts/retratos').sincronizar({}).then(r => { imagensLib.invalidar(); res.json({ ok: r.ok.length, falhas: r.falhas.length, offline: !!r.offline }); }).catch(e => res.status(500).json({ erro: e.message })); });
+  adm.get('/imagens', (_req, res) => res.json(db.prepare('SELECT * FROM imagens ORDER BY entidade_tipo, entidade_slug, id').all()));
+  adm.post('/imagens', (req, res, next) => { try { imagensLib.cadastrar(req.body || {}); imagensLib.invalidar(); res.status(201).json({ ok: true }); } catch (e) { next(e.status ? e : ERR(400, e.message)); } });
+  adm.patch('/imagens/:id/verificar', (req, res) => { db.prepare('UPDATE imagens SET verificada=? WHERE id=?').run(req.body?.verificada ? 1 : 0, req.params.id); imagensLib.invalidar(); res.json({ ok: true }); });
+  adm.delete('/imagens/:id', (req, res) => { db.prepare('DELETE FROM imagens WHERE id=?').run(req.params.id); imagensLib.invalidar(); res.json({ ok: true }); });
   api.use('/admin', adm);
   api.use((_req, _res, next) => next(ERR(404, 'Rota da API não encontrada.')));
   app.use('/api', api);
 
   const pub = path.join(__dirname, '..', 'public');
+  app.use('/images/personalidades', express.static(require('./lib/retratos_store').DIR, { maxAge: '7d' }));
   app.use(express.static(pub, { extensions: ['html'] }));
   app.use('/vendor/leaflet', express.static(path.join(__dirname, '..', 'node_modules', 'leaflet', 'dist')));
   app.use('/vendor/qrcode', express.static(path.join(__dirname, '..', 'node_modules', 'qrcode-generator')));
@@ -329,6 +342,11 @@ function criarApp() {
 
 if (require.main === module) {
   const app = criarApp(); const port = process.env.PORT || 3000;
+  if (process.env.MAPA_IMAGENS_AUTO !== '0') {
+    const rodar = () => require('../scripts/retratos').sincronizar({ log: m => console.log('[retratos]', m) })
+      .then(r => { if (!r.offline) console.log(`[retratos] ${r.ok.length} novo(s) retrato(s) baixado(s)`); }).catch(e => console.warn('[retratos]', e.message));
+    setTimeout(rodar, 3000).unref(); setInterval(rodar, 6 * 3600 * 1000).unref();   // tenta de novo a cada 6 h (útil se a rede voltar depois)
+  }
   app.listen(port, () => console.log(`Mapa de Crenças em http://localhost:${port}\nToken administrativo: ${app.locals.adminToken}`));
 }
 module.exports = { criarApp };

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node --no-warnings server/app.js",
+    "retratos": "node --no-warnings scripts/retratos.js sincronizar",
     "seed": "node --no-warnings server/seed/index.js --reset",
     "test": "node --no-warnings --test test/*.test.js"
   },

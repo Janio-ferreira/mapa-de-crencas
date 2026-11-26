@@ -45,6 +45,17 @@ Experiência principal da home (`#/perfil`): questionário de 44 perguntas → p
 - API: `GET /api/eixos`, `GET /api/perfil/questionario`, `GET|POST /api/perfil/resultado[/:codigo]`; `eixos` em `/api/tradicoes/:slug` e `/api/comparar`.
 - Privacidade: o servidor não guarda respostas; o link do resultado as carrega codificadas. O símbolo das tradições é um monograma gerado (não há imagem livre confiável para todas).
 
+### Imagens
+Tabela `imagens` (autor, licença, fonte e URL de origem obrigatórios; só licenças livres; só `verificada=1` aparece). Sem imagem verificada, a interface usa símbolo geométrico original (`public/js/simbolos.js`, com nota de cautela, herdado pela família religiosa) e fundo gerado — nunca imagem de preenchimento nem retrato imaginado.
+- Cadastrar em lote: `node --no-warnings scripts/importar-imagens.js imagens.json` (modelo em `scripts/imagens-exemplo.json`; entra como não verificada — confira a página de origem e use `--verificada` ou `PATCH /api/admin/imagens/:id/verificar`).
+- API: `GET /api/imagens?tipo=tradicao&slug=…`; admin (aba "Imagens" do painel ou API): `GET|POST /api/admin/imagens`, `PATCH …/:id/verificar`, `DELETE …/:id`.
+- Arquivos locais vão em `public/img/`; remotos só de `upload.wikimedia.org`/`commons.wikimedia.org`.
+- O resultado mostra cartões com imagem/símbolo, anéis de porcentagem, menu lateral, mapa de origens (Leaflet) e cartão de compartilhamento vertical ou quadrado.
+
+#### Retratos das personalidades
+Sem iniciais nem avatares: retrato verificado (pintura, gravura, escultura, fotografia…) ou círculo vazio “retrato confirmado indisponível”. Campos: `imagens_campos` (visão com `image_url, image_type, image_author, image_source, image_license, image_attribution, image_verified, image_source_page`) + `foco` do recorte circular. Fotografia é recusada para quem morreu antes de 1839.
+Busca verificada (rode numa máquina com internet): `node --no-warnings scripts/retratos.js buscar` → só aceita item do Wikidata humano com mesmos anos de nascimento/morte, usa a imagem principal (P18), exige licença livre e gera `retratos-candidatos.json` para conferência humana (`"conferido": true`) antes de `scripts/importar-imagens.js`. `retratos.js status` mostra a cobertura.
+
 ## Expansão
 1. `POST /api/admin/descoberta/wikidata` ou importe JSON em `POST /api/admin/candidatos`.
 2. Revise na aba *Candidatos* (duplicatas detectadas; mesclar vira nome alternativo).
@@ -52,7 +63,21 @@ Experiência principal da home (`#/perfil`): questionário de 44 perguntas → p
 Para ampliar o seed, adicione arquivos em `server/seed/` seguindo o formato dos existentes.
 
 ## Limites da versão 1
-- ~189 tradições; há grandes lacunas (povos indígenas, tradições africanas específicas, subdivisões internas, movimentos recentes).
+- ~287 tradições; há grandes lacunas (povos indígenas, tradições africanas específicas, subdivisões internas, movimentos recentes).
 - Doutrinas e similaridades são modelos simplificados, editáveis no banco; precisam de revisão acadêmica.
 - Favoritos ficam no navegador (sem contas de usuário).
 - O Wikidata só serve como pista; exige verificação em fonte acadêmica.
+
+### Retratos: sincronização automática e armazenamento local
+- `npm start` já tenta sincronizar sozinho (3 s após subir e a cada 6 h; desligue com `MAPA_IMAGENS_AUTO=0`). Com internet, para cada personalidade com datas precisas: encontra o item no Wikidata (humano, mesmos anos de nascimento/morte), usa só a imagem principal (P18), confere a licença livre no Commons, **baixa** a imagem e a miniatura para `public/images/personalidades/<slug>/`, evita duplicatas (SHA-256), valida o conteúdo e registra autor, instituição, licença e página de origem no banco e em `public/images/personalidades/manifest.json`. O site passa a servir só o arquivo local.
+- Manual: `npm run retratos` (ou `node --no-warnings scripts/retratos.js sincronizar [slug…] [--atualizar]`), `… verificar` (arquivos inválidos), `… status`.
+- O manifesto recria o banco após `npm run seed` ou em outra máquina. Sem internet, a rotina não faz nada e os cartões mostram o marcador "retrato confirmado indisponível".
+- Personalidades com datas imprecisas (ex.: "séc. VIII") não são casadas automaticamente; use `scripts/importar-imagens.js`.
+- Fundadores/figuras das páginas das tradições também recebem retrato (cadastro próprio ou o da personalidade de mesmo nome); sem imagem, mostram o marcador honesto.
+
+### Regra permanente: toda pessoa do catálogo passa pelo processo de retrato
+- "Pessoa" = qualquer personalidade (`pensadores`) ou fundador/figura (`figuras`), atual ou futura. A lista é derivada do banco (`server/lib/pessoas.js`), então quem for adicionado entra automaticamente na busca, sem editar mais nada.
+- Fluxo por pessoa: busca no Wikidata → confirmação de identidade (humano, mesmos anos de nascimento e morte) → imagem principal → licença livre no Commons → download local → créditos em banco e manifesto → exibição em perfis, resultado e páginas das tradições.
+- Resultados possíveis, sempre explícitos: `com_retrato`, `nao_tentado`, `manual` (datas imprecisas: informe o item do Wikidata em `scripts/retratos-curados.json`), `sem_registro_autentico` (figuras tradicionais, lendárias ou debatidas: não há retrato autêntico), `aniconismo` (tradições que restringem imagens da pessoa: nada é buscado), `sem_imagem`, `sem_correspondencia`, `recusado`, `erro`.
+- Auditoria: `node --no-warnings scripts/retratos.js relatorio` (ou `GET /admin/retratos/relatorio`). `test/retratos.test.js` falha se alguma pessoa ficar fora do relatório.
+- Curadoria: `scripts/retratos-curados.json` aceita `[{"slug": "...", "wikidata": "Q123", "arquivo": "opcional.jpg"}]` para pessoas sem datas precisas; a identidade é confirmada por quem preenche e a licença continua sendo conferida.

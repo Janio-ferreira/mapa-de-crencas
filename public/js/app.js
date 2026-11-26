@@ -147,7 +147,7 @@ async function perfil(_p, slug) {
   const corpo = {
     resumo: () => h`<p>${t.resumo}</p>`,
     origem: () => h`<dl class="ficha"><div><dt>Origem geográfica</dt><dd>${t.origem_texto || t.regiao_nome || 'Desconhecida'}</dd></div><div><dt>Surgimento</dt><dd>${t.inicio_ano != null ? ANO(t.inicio_ano) + (t.inicio_aprox ? ' (aprox.)' : '') : 'Desconhecido'}${t.fim_ano ? ' — fim: ' + ANO(t.fim_ano) : ''}</dd></div><div><dt>Período</dt><dd>${t.periodo_texto || 'Não informado'}</dd></div>
-      <div><dt>Fundadores / figuras</dt><dd>${t.fundadores.length ? t.fundadores.map(f => h`<div><strong>${f.nome}</strong> — ${f.descricao} ${f.nota ? h`<em>(${f.nota})</em>` : ''}</div>`) : 'Sem fundador identificado'}</dd></div></dl>`,
+      <div><dt>Fundadores / figuras</dt><dd>${t.fundadores.length ? t.fundadores.map(f => h`<div class="fund-linha">${PF.retrato({ slug: f.slug, nome: f.nome, tipo: 'pensador', imagem: f.imagem })}<div><strong>${f.nome}</strong> — ${f.descricao} ${f.nota ? h`<em>(${f.nota})</em>` : ''}${PF.notaRetrato({ tipo: 'pensador', imagem: f.imagem })}</div></div>`) : 'Sem fundador identificado'}</dd></div></dl>`,
     contexto: () => txt(t.contexto_historico), historia: () => txt(t.historia),
     crencas: () => t.crencas.length ? h`<ul>${t.crencas.map(c => h`<li><strong>${c.titulo}.</strong> ${c.descricao}</li>`)}</ul>` : txt(null),
     divindade: () => txt(t.divindade), humanidade: () => txt(t.humanidade), alma: () => txt(t.alma_espirito), posmorte: () => txt(t.pos_morte),
@@ -164,7 +164,7 @@ async function perfil(_p, slug) {
   };
   const verif = t.verificacao === 'revisado_academicamente' ? 'Revisado academicamente' : 'Curadoria inicial — ainda não revisado por especialista';
   render(main, h`<article class="perfil"><nav class="toc" aria-label="Neste perfil">${SECOES.map(([id, n]) => h`<a href="#/tradicao/${t.slug}" data-sec="${id}">${n}</a>`)}</nav>
-    <div><header class="cab">
+    <div>${PF.capaTrad({ slug: t.slug, nome: t.nome, simbolo: t.simbolo, imagem: t.imagens?.[0] || null }, 'alta')}<header class="cab">
       <div class="crumbs"><a href="#/catalogo">Catálogo</a>${t.cadeia.map(c => h` › <a href="#/tradicao/${c.slug}">${c.nome}</a>`)}</div>
       <h1>${t.nome}</h1>
       <div class="meta"><span class="tag">${CAT[t.categoria]}</span><span class="tag sit-${t.situacao}">${SIT[t.situacao]}</span><span class="tag">${verif}</span><button class="btn sec peq" data-fav="${t.slug}" data-rot="1" aria-pressed="false">☆ Favoritar</button><a class="btn sec peq" href="#/comparar?slugs=${t.slug}">Comparar</a></div>
@@ -333,7 +333,7 @@ async function adminView() {
     $('#lg').onsubmit = async e => { e.preventDefault(); sessionStorage.setItem('adm', $('#tk').value); try { await api('/admin/ping', { admin: true }); adminView(); } catch { sessionStorage.removeItem('adm'); toast('Token inválido.'); } };
     return;
   }
-  const abas = ['Tradições', 'Candidatos', 'Nova tradição', 'Referências', 'Qualidade', 'Auditoria']; let aba = store.get('abaAdm', 0);
+  const abas = ['Tradições', 'Candidatos', 'Nova tradição', 'Referências', 'Qualidade', 'Auditoria', 'Imagens']; let aba = store.get('abaAdm', 0);
   const shell = () => render(main, h`<h1>Painel administrativo</h1><div class="tab" role="tablist">${abas.map((a, i) => h`<button role="tab" class="${i === aba ? 'ativo' : ''}" data-aba="${i}">${a}</button>`)}<button style="margin-left:auto" id="sair">Sair</button></div><div id="adm"></div>`);
   let A; const call = (u, o = {}) => api('/admin' + u, { admin: true, ...o });
   const wrap = f => async (...a) => { try { await f(...a); } catch (e) { toast(e.message); } };
@@ -401,7 +401,19 @@ async function adminView() {
   }
   async function viewQ() { const l = await call('/qualidade'); render(A, h`<p class="desconhecido">Prioridade de revisão: menos dimensões documentadas e menos referências aparecem primeiro.</p><div class="tabela-wrap"><table class="lista"><thead><tr><th>Tradição</th><th>Refs</th><th>Dimensões</th><th>Conf. média</th><th>Verificação</th></tr></thead><tbody>${l.map(t => h`<tr><td><a href="#/tradicao/${t.slug}">${t.nome}</a></td><td>${t.refs}</td><td>${t.dimensoes}/14</td><td>${t.conf_media ? Math.round(t.conf_media * 100) + '%' : '—'}</td><td>${t.verificacao}</td></tr>`)}</tbody></table></div>`); }
   async function viewAud() { const l = await call('/auditoria'); render(A, h`<table class="lista"><thead><tr><th>Quando</th><th>Ação</th><th>Entidade</th><th>Detalhe</th></tr></thead><tbody>${l.map(a => h`<tr><td>${a.quando}</td><td>${a.acao}</td><td>${a.entidade} #${a.entidade_id}</td><td><small>${a.detalhe || ''}</small></td></tr>`)}</tbody></table>`); }
-  async function carregar() { shell(); A = $('#adm'); $('#sair').onclick = () => { sessionStorage.removeItem('adm'); adminView(); }; document.querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { aba = +b.dataset.aba; store.set('abaAdm', aba); carregar(); }); try { await [viewTrad, viewCand, () => form(), viewRef, viewQ, viewAud][aba](); } catch (e) { toast(e.message); } }
+  async function viewImg() {
+    const l = await call('/imagens');
+    render(A, h`<p class="desconhecido">Só imagens <strong>verificadas</strong> aparecem no site. Confira a página de origem (autor, licença) antes de verificar. Licenças aceitas: domínio público, CC0, CC BY, CC BY-SA.</p>
+      <form id="fimg" class="cartao" style="display:grid;gap:.6rem;margin-bottom:1rem"><h3 style="margin:0">Cadastrar imagem</h3>
+      <div class="grade tres">${[['entidade_tipo', 'Tipo (tradicao, pensador, texto, regiao)'], ['entidade_slug', 'Slug da entidade'], ['papel', 'Papel (foto, monumento, retrato, capa, simbolo, mapa, bandeira)'], ['arquivo_url', 'URL da imagem (/img/… ou https do Wikimedia)'], ['alt', 'Texto alternativo (o que a imagem mostra)'], ['autor', 'Autor'], ['licenca', 'Licença (ex.: CC BY-SA 4.0)'], ['fonte_nome', 'Nome da fonte'], ['fonte_url', 'URL da página de origem']].map(([k, n]) => h`<div class="campo"><label for="i-${k}">${n}</label><input id="i-${k}" name="${k}" required></div>`)}</div>
+      <button class="btn" type="submit">Cadastrar (entra como não verificada)</button></form>
+      <div class="tabela-wrap"><table class="lista"><thead><tr><th>Entidade</th><th>Papel</th><th>Imagem</th><th>Autor · licença</th><th>Fonte</th><th>Verificada</th><th></th></tr></thead><tbody>${l.length ? l.map(i => h`<tr><td>${i.entidade_tipo}: ${i.entidade_slug}</td><td>${i.papel}</td><td><a href="${i.arquivo_url}" target="_blank" rel="noopener">abrir</a></td><td>${i.autor} · ${i.licenca}</td><td><a href="${i.fonte_url}" target="_blank" rel="noopener">${i.fonte_nome}</a></td>
+        <td><input type="checkbox" data-v="${i.id}" ${i.verificada ? raw('checked') : ''} aria-label="Verificada"></td><td><button class="btn sec peq" data-del="${i.id}">Remover</button></td></tr>`) : h`<tr><td colspan="7" class="desconhecido">Nenhuma imagem cadastrada: o site usa símbolos e ilustrações originais.</td></tr>`}</tbody></table></div>`);
+    $('#fimg').onsubmit = wrap(async e => { e.preventDefault(); const body = Object.fromEntries(new FormData(e.target)); await call('/imagens', { method: 'POST', body }); toast('Imagem cadastrada (não verificada).'); viewImg(); });
+    A.querySelectorAll('[data-v]').forEach(c => c.onchange = wrap(async () => { await call(`/imagens/${c.dataset.v}/verificar`, { method: 'PATCH', body: { verificada: c.checked } }); toast(c.checked ? 'Marcada como verificada.' : 'Verificação removida.'); }));
+    A.querySelectorAll('[data-del]').forEach(b => b.onclick = wrap(async () => { if (!confirm('Remover esta imagem?')) return; await call('/imagens/' + b.dataset.del, { method: 'DELETE' }); viewImg(); }));
+  }
+  async function carregar() { shell(); A = $('#adm'); $('#sair').onclick = () => { sessionStorage.removeItem('adm'); adminView(); }; document.querySelectorAll('[data-aba]').forEach(b => b.onclick = () => { aba = +b.dataset.aba; store.set('abaAdm', aba); carregar(); }); try { await [viewTrad, viewCand, () => form(), viewRef, viewQ, viewAud, viewImg][aba](); } catch (e) { toast(e.message); } }
   await carregar();
 }
 

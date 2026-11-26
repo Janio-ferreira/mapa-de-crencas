@@ -13,6 +13,7 @@ const { db } = require('./db');
 const compat = require('./compat');
 const eixos = require('./eixos');
 const Q = require('./questionario');
+const imagens = require('./imagens');
 
 const FRASES = {
   divindade: ['não vê base para crer em deuses', 'crê em alguma realidade divina'],
@@ -101,13 +102,13 @@ function resultado({ respostas, importancias = {}, incluirTodas = false } = {}) 
   const fortes = [...ok].sort((x, y) => Math.abs(y.valor - 50) - Math.abs(x.valor - 50)).filter(e => e.intensidade !== 'intermediária').slice(0, 4);
   const frase = e => FRASES[e.id][e.lado === 'esq' ? 0 : 1];
   const sintese = fortes.length ? `Você ${fortes.map(frase).join('; ')}.` : 'Suas respostas ficaram em posições intermediárias na maioria dos eixos.';
-  const classificacao = cand.length ? { nome, misto, descricao: descPerfil, sintese, similaridade: Math.round(cand[0].pct), candidatos: cand.slice(0, 4).map(c => ({ id: c.id, nome: c.nome, pct: Math.round(c.pct) })), aviso: 'Este nome descreve seu conjunto de posições; não é uma religião nem um rótulo de pertencimento.' } : { nome: 'Perfil ainda indefinido', misto: true, descricao: 'Há poucos eixos com resposta para nomear um perfil.', sintese, similaridade: null, candidatos: [] };
+  const classificacao = cand.length ? { id: cand[0].id, id2: misto && cand[1] ? cand[1].id : null, nome, misto, descricao: descPerfil, sintese, similaridade: Math.round(cand[0].pct), candidatos: cand.slice(0, 4).map(c => ({ id: c.id, nome: c.nome, pct: Math.round(c.pct) })), aviso: 'Este nome descreve seu conjunto de posições; não é uma religião nem um rótulo de pertencimento.' } : { nome: 'Perfil ainda indefinido', misto: true, descricao: 'Há poucos eixos com resposta para nomear um perfil.', sintese, similaridade: null, candidatos: [] };
 
   // --- tradições
   const C = compat.carregar();
   const cx = compat.calcular(resp, { limite: 1000 });
   const eixosTrad = eixos.eixosDeTodas();
-  const meta = Object.fromEntries(db.prepare('SELECT t.slug, t.resumo, t.parent_id, p.nome pai, p.slug pai_slug FROM tradicoes t LEFT JOIN tradicoes p ON p.id=t.parent_id').all().map(r => [r.slug, r]));
+  const meta = Object.fromEntries(db.prepare('SELECT t.slug, t.resumo, t.parent_id, t.origem_texto, t.origem_lat, t.origem_lng, p.nome pai, p.slug pai_slug FROM tradicoes t LEFT JOIN tradicoes p ON p.id=t.parent_id').all().map(r => [r.slug, r]));
   const uOk = Object.fromEntries(ok.map(e => [e.id, e]));
   const lista = cx.resultados.map(r => {
     const et = eixosTrad[r.slug] || {};
@@ -204,12 +205,23 @@ function resultado({ respostas, importancias = {}, incluirTodas = false } = {}) 
     if (ps.length >= 2 && Object.keys(m).length >= 2) tensoes.push(C.porChave[dim]?.nome);
   }
 
+  // --- imagens e símbolos (só imagens verificadas; sem imagem -> símbolo/ilustração no front)
+  const enr = t => ({ ...t, imagem: imagens.principal('tradicao', t.slug, ['foto', 'monumento']), simbolo: imagens.simboloDe(t.slug), origem: meta[t.slug]?.origem_lat != null ? { texto: meta[t.slug].origem_texto, lat: meta[t.slug].origem_lat, lng: meta[t.slug].origem_lng } : null });
+  const geral = vivas.slice(0, 10).map(enr);
+  const mapa = vivas.slice(0, 8).filter(t => meta[t.slug]?.origem_lat != null).map(t => ({ slug: t.slug, nome: t.nome, compatibilidade: t.compatibilidade, origem: meta[t.slug].origem_texto, lat: meta[t.slug].origem_lat, lng: meta[t.slug].origem_lng, imagem: imagens.principal('tradicao', t.slug, ['foto', 'monumento', 'mapa']), bandeira: imagens.principal('tradicao', t.slug, ['bandeira']) }));
+  const pensComImg = [...pensadores, ...escolas].map(p => ({ ...p, imagem: imagens.principal('pensador', p.slug, ['retrato', 'foto']) }));
+  const pensadoresF = pensComImg.filter(p => p.tipo === 'pensador'), escolasF = pensComImg.filter(p => p.tipo !== 'pensador');
+  const textosF = textos.map(t => ({ ...t, imagem: imagens.principal('texto', t.slug, ['capa', 'foto']) }));
+  const livros = [
+    ...textosF.map(t => { const tr = vivas.find(v => v.slug === t.tslug); return { tipo: 'texto', slug: t.slug, titulo: t.nome, subtipo: t.tipo, autor: null, periodo: null, descricao: t.descricao, tradicao: t.tnome, tradicao_slug: t.tslug, relacao: `Texto de ${t.tnome}, tradição com ${tr ? tr.compatibilidade : '—'}% de proximidade com suas respostas.`, imagem: t.imagem }; }),
+    ...pensadoresF.slice(0, 4).flatMap(p => String(p.obras || '').split(';').map(x => x.trim()).filter(Boolean).slice(0, 2).map(o => ({ tipo: 'obra', titulo: o, subtipo: 'obra de pensador', autor: p.nome, periodo: p.vida, descricao: null, tradicao: p.tradicao, tradicao_slug: p.tradicao_slug, relacao: `Obra de ${p.nome}, com ${p.similaridade}% de afinidade com seu perfil.`, imagem: null }))),
+  ];
   const out = {
     versao: 'v1', codigo: Q.codificar(respostas, imp), respondidas: av.respondidas, total_perguntas: av.total, provisorio: av.respondidas < 20,
     importancias: imp, temas: Q.TEMAS, classificacao, eixos: eixosUsuario, tracos, agnostico: !!av.tracosFlags.agnosticismo,
-    ranking: { geral: vivas.slice(0, 10), religioes, ramos, movimentos, por_eixo: porEixoProx, mais_distantes: distantes },
+    ranking: { geral, religioes: religioes.map(enr), ramos: ramos.map(enr), movimentos, por_eixo: porEixoProx, mais_distantes: distantes },
     distintivo: { distinguem, comuns, todos: distintivo },
-    pensadores, escolas, relacionadas, historicas, textos, tensoes: [...new Set(tensoes)].filter(Boolean),
+    pensadores: pensadoresF, escolas: escolasF, livros, mapa, relacionadas, historicas, textos: textosF, tensoes: [...new Set(tensoes)].filter(Boolean),
     dados_insuficientes: cx.dados_insuficientes.length,
     metodo: {
       formula: 'final = 0,6 × concordância doutrinal + 0,4 × proximidade nos 12 eixos − penalidade por divergências fundamentais (máx. 10 pontos).',

@@ -278,3 +278,25 @@ CREATE TABLE IF NOT EXISTS pensador_eixos (
   confianca REAL NOT NULL DEFAULT 0.6,
   PRIMARY KEY (pensador_id, eixo)
 );
+
+-- Imagens com origem e licença registradas. Só imagens verificadas=1 são exibidas; sem imagem, a interface usa símbolo/ilustração tipográfica.
+CREATE TABLE IF NOT EXISTS imagens (
+  id INTEGER PRIMARY KEY,
+  entidade_tipo TEXT NOT NULL CHECK (entidade_tipo IN ('tradicao','pensador','figura','texto','regiao')),
+  entidade_slug TEXT NOT NULL,
+  papel TEXT NOT NULL CHECK (papel IN ('foto','monumento','retrato','capa','simbolo','mapa','bandeira')),
+  arquivo_url TEXT NOT NULL,
+  miniatura_url TEXT,
+  titulo TEXT,
+  alt TEXT NOT NULL,
+  autor TEXT NOT NULL,
+  licenca TEXT NOT NULL,
+  licenca_url TEXT,
+  fonte_nome TEXT NOT NULL,
+  fonte_url TEXT NOT NULL,
+  data_acesso TEXT,
+  verificada INTEGER NOT NULL DEFAULT 0,
+  nota TEXT,
+  UNIQUE (entidade_tipo, entidade_slug, arquivo_url)
+);
+CREATE INDEX IF NOT EXISTS ix_imagens_ent ON imagens(entidade_tipo, entidade_slug);
