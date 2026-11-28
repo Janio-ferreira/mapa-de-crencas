@@ -117,8 +117,8 @@ async function armazenarCandidato(reg) {
   const grande = await baixar(reg.arquivo_url); const pequena = await baixar(reg.miniatura_url).catch(() => null);
   const a = store.armazenar(reg.entidade_slug, grande, pequena);
   const final = { ...reg, origem_url: reg.arquivo_url, arquivo_url: a.url, miniatura_url: a.miniatura, sha256: a.sha256,
-    verificada: true, data_acesso: new Date().toISOString().slice(0, 10),
-    nota: `${reg.nota || ''} Verificação automática: item do Wikidata (${reg.wikidata}) com os mesmos anos de nascimento e morte; imagem principal P18; licença livre conferida no Commons. Arquivo copiado para o servidor.`.trim() };
+    verificada: false, data_acesso: new Date().toISOString().slice(0, 10),
+    nota: `${reg.nota || ''} Candidato automático (aguarda verificação humana): item do Wikidata (${reg.wikidata}) com os mesmos anos de nascimento e morte; imagem principal P18; licença livre conferida no Commons. Arquivo copiado para o servidor.`.trim() };
   delete final.conferido; delete final.checagens; delete final.url_conferencia; delete final.wikidata;
   imagens.cadastrar(final); store.registrarNoManifesto(final); imagens.invalidar();
   return { ...a, tipo: final.tipo_representacao };

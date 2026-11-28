@@ -9,6 +9,7 @@ const compat = require('./lib/compat');
 const eixosLib = require('./lib/eixos');
 const perfilLib = require('./lib/perfil');
 const imagensLib = require('./lib/imagens');
+const pacoteLib = require('./lib/pacote_imagens');
 const questionario = require('./lib/questionario');
 const desc = require('./lib/descoberta');
 const { seed } = require('./seed');
@@ -21,9 +22,15 @@ const ERR = (status, msg) => Object.assign(new Error(msg), { status });
 function criarApp() {
   seed();
   require('./seed/aplicar_eixos').aplicar();
-  try { require('./lib/retratos_store').reimportar(); } catch (e) { console.warn('Retratos locais:', e.message); }
+  let nT = 0, nP = 0;
+  try { nT = pacoteLib.reimportarTradicoes(); } catch (e) { console.warn('Imagens locais de tradições:', e.message); }
+  try { nP = require('./lib/retratos_store').reimportar(); } catch (e) { console.warn('Retratos locais:', e.message); }
+  if (process.env.NODE_ENV !== 'test' && !process.env.MAPA_SILENCIO) {
+    try { const a = pacoteLib.auditoriaCompleta();
+      console.log(`[imagens] banco: ${a.total} (${a.verificadas} verificadas, ${a.pendentes} aguardando aprovação) · manifesto: ${a.manifesto.total} (${a.manifesto.semArquivo} sem arquivo) · arquivos em disco: ${a.arquivosEmDisco} (${a.orfaosSemRegistro} sem registro) · restauradas agora: ${nT + nP}${(pacoteLib.relatorioRestauracao()?.rejeitadas.length ? ' · REJEITADAS: ' + pacoteLib.relatorioRestauracao().rejeitadas.length : '')}${(pacoteLib.relatorioRestauracao()?.slugDesconhecido.length ? ' · slug fora do catálogo: ' + pacoteLib.relatorioRestauracao().slugDesconhecido.length : '')}${a.manifestoErro ? ' · ATENÇÃO: ' + a.manifestoErro : ''}`); } catch (e) { console.warn('[imagens] auditoria:', e.message); }
+  }
   try { const r = require('./lib/pessoas').relatorio(); const sem = r.filter(x => x.status === 'nao_tentado').length;
-    if (sem) console.log(`[retratos] ${sem} de ${r.length} pessoas ainda sem retrato verificado (a sincronização tentará obtê-los quando houver internet).`); } catch { /* relatório é informativo */ }
+    if (sem) console.log(`[retratos] ${sem} de ${r.length} pessoas ainda sem retrato verificado (use npm run retratos para buscá-los; entram como não verificados).`); } catch { /* relatório é informativo */ }
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -183,13 +190,17 @@ function criarApp() {
 
   api.get('/imagens', (req, res) => res.json({ imagens: imagensLib.imagensDe(String(req.query.tipo || 'tradicao'), String(req.query.slug || '')), simbolo: req.query.tipo === 'tradicao' ? imagensLib.simboloDe(String(req.query.slug || '')) : null }));
   api.get('/eixos', (_req, res) => res.json({ eixos: eixosLib.definicoes(), temas: questionario.TEMAS }));
-  api.get('/perfil/questionario', (_req, res) => res.json({ versao: 'v1', perguntas: questionario.perguntasPublicas(), temas: questionario.TEMAS,
-    escala: ['Discordo totalmente', 'Discordo', 'Em parte / sem posição', 'Concordo', 'Concordo totalmente'], minimo: 8, recomendado: 20 }));
+  api.get('/perfil/versoes', (_req, res) => res.json({ versoes: questionario.listaVersoes(), padrao: 'v1' }));
+  api.get('/perfil/questionario', (req, res, next) => {
+    const V = questionario.versao(String(req.query.versao || 'v1')); if (!V) return next(ERR(400, 'Versão de questionário desconhecida.'));
+    res.json({ versao: V.id, nome: V.nome, perguntas: questionario.perguntasPublicas(V.id), temas: questionario.TEMAS,
+      escala: ['Discordo totalmente', 'Discordo', 'Em parte / sem posição', 'Concordo', 'Concordo totalmente'], minimo: V.minimo, recomendado: V.recomendado, minutos: V.minutos, descricao: V.descricao });
+  });
   api.post('/perfil/resultado', (req, res, next) => {
     try {
-      let { respostas, importancias, codigo } = req.body || {};
-      if (codigo) { const d = questionario.decodificar(codigo); if (!d) return next(ERR(400, 'Código de resultado inválido.')); respostas = d.respostas; importancias = importancias && Object.keys(importancias).length ? importancias : d.importancias; }
-      res.json(perfilLib.resultado({ respostas: respostas || {}, importancias: importancias || {} }));
+      let { respostas, importancias, codigo, versao } = req.body || {};
+      if (codigo) { const d = questionario.decodificar(codigo); if (!d) return next(ERR(400, 'Código de resultado inválido.')); respostas = d.respostas; versao = d.versao; importancias = importancias && Object.keys(importancias).length ? importancias : d.importancias; }
+      res.json(perfilLib.resultado({ respostas: respostas || {}, importancias: importancias || {}, versao: versao || 'v1' }));
     } catch (e) { next(e); }
   });
   api.get('/perfil/resultado/:codigo', (req, res, next) => {
@@ -314,10 +325,37 @@ function criarApp() {
 
   adm.get('/retratos/relatorio', (_req, res) => { const r = require('./lib/pessoas').relatorio(); const por = {}; r.forEach(x => { por[x.status] = (por[x.status] || 0) + 1; }); res.json({ total: r.length, por_status: por, pessoas: r }); });
   adm.post('/retratos/sincronizar', (_req, res) => { require('../scripts/retratos').sincronizar({}).then(r => { imagensLib.invalidar(); res.json({ ok: r.ok.length, falhas: r.falhas.length, offline: !!r.offline }); }).catch(e => res.status(500).json({ erro: e.message })); });
-  adm.get('/imagens', (_req, res) => res.json(db.prepare('SELECT * FROM imagens ORDER BY entidade_tipo, entidade_slug, id').all()));
+  // Sem ?pagina → lista completa (compatível). Com ?pagina=N → { itens, total, pagina, porPagina, contagem } com filtros situacao (pendentes|verificadas), tipo, q (slug).
+  adm.get('/imagens', (req, res) => {
+    const q = req.query || {};
+    if (q.pagina === undefined) return res.json(db.prepare('SELECT * FROM imagens ORDER BY entidade_tipo, entidade_slug, id').all());
+    const w = [], p = [];
+    if (q.situacao === 'pendentes') w.push('verificada=0'); else if (q.situacao === 'verificadas') w.push('verificada=1');
+    if (q.tipo) { w.push('entidade_tipo=?'); p.push(String(q.tipo)); }
+    if (q.q) { w.push('entidade_slug LIKE ?'); p.push('%' + String(q.q).replace(/[%_]/g, '') + '%'); }
+    const where = w.length ? ' WHERE ' + w.join(' AND ') : '';
+    const porPagina = Math.min(200, Math.max(10, +q.porPagina || 50)), pagina = Math.max(1, +q.pagina || 1);
+    const total = db.prepare('SELECT COUNT(*) n FROM imagens' + where).get(...p).n;
+    const itens = db.prepare('SELECT * FROM imagens' + where + ' ORDER BY entidade_tipo, entidade_slug, id LIMIT ? OFFSET ?').all(...p, porPagina, (pagina - 1) * porPagina);
+    const contagem = db.prepare('SELECT COUNT(*) total, COALESCE(SUM(verificada=1),0) verificadas, COALESCE(SUM(verificada=0),0) pendentes FROM imagens').get();
+    res.json({ itens, total, pagina, porPagina, contagem });
+  });
   adm.post('/imagens', (req, res, next) => { try { imagensLib.cadastrar(req.body || {}); imagensLib.invalidar(); res.status(201).json({ ok: true }); } catch (e) { next(e.status ? e : ERR(400, e.message)); } });
-  adm.patch('/imagens/:id/verificar', (req, res) => { db.prepare('UPDATE imagens SET verificada=? WHERE id=?').run(req.body?.verificada ? 1 : 0, req.params.id); imagensLib.invalidar(); res.json({ ok: true }); });
-  adm.delete('/imagens/:id', (req, res) => { db.prepare('DELETE FROM imagens WHERE id=?').run(req.params.id); imagensLib.invalidar(); res.json({ ok: true }); });
+  adm.patch('/imagens/:id/verificar', (req, res, next) => {
+    try {
+      const row = db.prepare('SELECT * FROM imagens WHERE id=?').get(req.params.id); if (!row) return next(ERR(404, 'Imagem não encontrada.'));
+      const v = req.body?.verificada ? 1 : 0; db.prepare('UPDATE imagens SET verificada=? WHERE id=?').run(v, row.id);
+      const persistida = pacoteLib.marcarNoManifesto(row, { verificada: !!v }); imagensLib.invalidar(); res.json({ ok: true, persistida });
+    } catch (e) { next(e.status ? e : ERR(500, e.message)); }
+  });
+  // Remover tira a imagem do site e do banco e a marca como removida no manifesto (não volta no próximo início). O ARQUIVO NÃO é apagado.
+  adm.delete('/imagens/:id', (req, res, next) => {
+    try {
+      const row = db.prepare('SELECT * FROM imagens WHERE id=?').get(req.params.id);
+      if (row) pacoteLib.marcarNoManifesto(row, { removida: true, verificada: false });
+      db.prepare('DELETE FROM imagens WHERE id=?').run(req.params.id); imagensLib.invalidar(); res.json({ ok: true });
+    } catch (e) { next(e.status ? e : ERR(500, e.message)); }
+  });
   api.use('/admin', adm);
   api.use((_req, _res, next) => next(ERR(404, 'Rota da API não encontrada.')));
   app.use('/api', api);
@@ -342,7 +380,8 @@ function criarApp() {
 
 if (require.main === module) {
   const app = criarApp(); const port = process.env.PORT || 3000;
-  if (process.env.MAPA_IMAGENS_AUTO !== '0') {
+  // A sincronização automática de retratos (usa a internet) só roda se pedida: MAPA_IMAGENS_AUTO=1. Mesmo então, tudo entra como NÃO verificado.
+  if (process.env.MAPA_IMAGENS_AUTO === '1') {
     const rodar = () => require('../scripts/retratos').sincronizar({ log: m => console.log('[retratos]', m) })
       .then(r => { if (!r.offline) console.log(`[retratos] ${r.ok.length} novo(s) retrato(s) baixado(s)`); }).catch(e => console.warn('[retratos]', e.message));
     setTimeout(rodar, 3000).unref(); setInterval(rodar, 6 * 3600 * 1000).unref();   // tenta de novo a cada 6 h (útil se a rede voltar depois)

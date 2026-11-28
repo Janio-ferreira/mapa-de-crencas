@@ -1,6 +1,8 @@
 const test = require('node:test'); const assert = require('node:assert');
-process.env.DB_FILE = '/tmp/test-compat.db';
-require('fs').rmSync('/tmp/test-compat.db', { force: true }); 
+const _os = require('os'), _path = require('path'), _fs = require('fs');
+const _dir = _fs.mkdtempSync(_path.join(_os.tmpdir(), 'compat-'));   // portátil (Windows/Linux/macOS): nada de /tmp fixo
+process.env.DB_FILE = _path.join(_dir, 'test-compat.db'); process.env.DATA_DIR = _dir;
+
 const { seed } = require('../server/seed'); seed({ reset: true });
 const { calcular } = require('../server/lib/compat');
 const top = (a, n = 5) => calcular(a).resultados.slice(0, n).map(r => r.slug);

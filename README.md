@@ -36,7 +36,22 @@ test/                 testes
 `GET /api/tradicoes?q=&categoria=&situacao=&regiao=&de=&ate=&ordem=` · `GET /api/tradicoes/:slug` · `GET /api/arvore` · `GET /api/mapa` · `GET /api/linha-do-tempo` · `GET /api/referencias` · `GET /api/comparar?slugs=a,b` · `GET /api/dimensoes` · `POST /api/compatibilidade` · `/api/admin/*` (Bearer token)
 
 ## Meu Perfil Religioso (12 eixos)
-Experiência principal da home (`#/perfil`): questionário de 44 perguntas → perfil nos **12 eixos** → comparação com todo o catálogo.
+Experiência principal da home (`#/perfil`): questionário em **3 versões (Rápido 44, Completo 128 e Acadêmico 244 perguntas)** → perfil nos **12 eixos** → comparação com todo o catálogo.
+
+**Versões do questionário** (cada uma tem perguntas próprias; a escolha é feita na página `#/perfil`; as respostas são salvas separadamente por versão):
+
+| Versão | Perguntas | Mínimo / recomendado | Foco |
+|---|---|---|---|
+| `v1` Padrão | 44 | 8 / 20 | visão geral dos 10 temas |
+| `v128` Completo | 128 | 24 / 62 | todos os temas, com textos sagrados, filosofia, práticas, ética e pluralismo; 15 dilemas de escolha |
+| `v244` Acadêmico | 244 | 40 / 120 | nuances: dilemas e cenários, mal e sofrimento, mistério e experiência, cuidado com os mortos, carisma e profecia, magia e cura, vida familiar, justiça social, religião e Estado, religiões antigas e modernas |
+
+- Código: `server/lib/questionarios/` (`dsl.js` helpers, `v128.js`, `v244.js`; a de 44 continua em `server/lib/questionario.js`). Cada pergunta declara efeitos (`dimensão:opção:massa`) sobre as mesmas dimensões doutrinárias, então **todas as versões comparam com o mesmo catálogo e a mesma fórmula** (0,6 doutrina + 0,4 eixos − penalidade). Mais perguntas = mais evidência por dimensão, não outra métrica.
+- **A ordem das perguntas faz parte do código de compartilhamento** (`v128-…`, `v244-…`; `v1-…` continua válido). Só acrescente perguntas no fim de cada arquivo.
+- Perguntas escala (concordar reforça A, discordar reforça B) e de escolha; alternativas equilibradas entre famílias religiosas, sem nomear tradições. Itens "neutros" ou pulados não geram evidência.
+- Resultado: 12 eixos, ranking por categoria, **leitura por dimensão** (distribuição das respostas, firme/moderada/dividida, nº de perguntas) e cobertura por tema; v128/v244 acrescentam **traços complementares** (misticismo, milagres, apego à tradição, ascetismo, missão, fim dos tempos, destino, livre-arbítrio, experiência), que não entram na comparação porque o banco não tem dado equivalente.
+- API: `GET /api/perfil/versoes`, `GET /api/perfil/questionario?versao=v128`, `POST /api/perfil/resultado { respostas, versao }` (ou `{ codigo }`).
+- Testes (`test/questionarios.test.js`): contagem, ausência de perguntas repetidas, validade de todos os efeitos, equilíbrio de cobertura por opção, código de compartilhamento, mínimo por versão, API e **respondentes simulados**: para cada uma das ~297 tradições com dados doutrinários, simula-se quem responde como ela e verifica-se que ela aparece a ≤4 pontos do topo (v44: 89%; v128: 100%; v244: 99%).
 - `server/lib/eixos.js` — definição dos 12 eixos e projeção (0–100) das dimensões doutrinárias; a mesma função projeta tradições e usuário (dado ausente continua ausente; eixos “não se aplica”).
 - `server/lib/questionario.js` — perguntas (escolha, escala 1–5, “pular”), efeitos por dimensão, código compartilhável `v1-…` (**só acrescentar perguntas no fim**).
 - `server/lib/perfil.js` — perfil descritivo (arquétipos, perfil misto), pontuação explicável (60% doutrinal + 40% eixos − divergências fundamentais), “o que te distingue”, pensadores/escolas, relações históricas, textos.
@@ -63,7 +78,7 @@ Busca verificada (rode numa máquina com internet): `node --no-warnings scripts/
 Para ampliar o seed, adicione arquivos em `server/seed/` seguindo o formato dos existentes.
 
 ## Limites da versão 1
-- ~287 tradições; há grandes lacunas (povos indígenas, tradições africanas específicas, subdivisões internas, movimentos recentes).
+- ~336 tradições; há grandes lacunas (povos indígenas, tradições africanas específicas, subdivisões internas, movimentos recentes).
 - Doutrinas e similaridades são modelos simplificados, editáveis no banco; precisam de revisão acadêmica.
 - Favoritos ficam no navegador (sem contas de usuário).
 - O Wikidata só serve como pista; exige verificação em fonte acadêmica.
@@ -81,3 +96,9 @@ Para ampliar o seed, adicione arquivos em `server/seed/` seguindo o formato dos 
 - Resultados possíveis, sempre explícitos: `com_retrato`, `nao_tentado`, `manual` (datas imprecisas: informe o item do Wikidata em `scripts/retratos-curados.json`), `sem_registro_autentico` (figuras tradicionais, lendárias ou debatidas: não há retrato autêntico), `aniconismo` (tradições que restringem imagens da pessoa: nada é buscado), `sem_imagem`, `sem_correspondencia`, `recusado`, `erro`.
 - Auditoria: `node --no-warnings scripts/retratos.js relatorio` (ou `GET /admin/retratos/relatorio`). `test/retratos.test.js` falha se alguma pessoa ficar fora do relatório.
 - Curadoria: `scripts/retratos-curados.json` aceita `[{"slug": "...", "wikidata": "Q123", "arquivo": "opcional.jpg"}]` para pessoas sem datas precisas; a identidade é confirmada por quem preenche e a licença continua sendo conferida.
+
+## Imagens: coleta externa e importação
+O ambiente de desenvolvimento não alcança fontes de imagem. O fluxo para importar imagens reais baixadas em outro computador (validação automática,
+metadados completos, aprovação humana obrigatória) está em [`docs/IMAGENS-COLETA-EXTERNA.md`](docs/IMAGENS-COLETA-EXTERNA.md).
+Comandos: `npm run imagens:validar -- <pasta>`, `npm run imagens:importar -- <pasta>`, `npm run imagens:auditar`, `node --no-warnings scripts/imagens-pendencias.js`.
+Os scripts `colecionar-imagens.js` e `retratos.js` continuam disponíveis para máquinas com internet.

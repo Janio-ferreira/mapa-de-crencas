@@ -27,11 +27,7 @@ const TEMAS = [
 ];
 const TEMA_DE_DIM = {}; TEMAS.forEach(t => t.dims.forEach(d => { TEMA_DE_DIM[d] = t.id; }));
 
-const E = s => String(s || '').trim().split(/\s+/).filter(Boolean).map(x => { const [dim, opcao, m] = x.split(':'); return { dim, opcao, massa: m === undefined ? 1 : parseFloat(m) }; });
-/** Escala: S(v1, v2, v4, v5) — v3 não gera efeito. */
-const S = (a, b, c, d) => [a, b, '', c, d];
-const esc = (id, tema, texto, efeitos, extra = {}) => ({ id, tema, tipo: 'escala', texto, efeitos: efeitos.map(E), ...extra });
-const esl = (id, tema, texto, opcoes, extra = {}) => ({ id, tema, tipo: 'escolha', texto, opcoes: opcoes.map(([t, e, x]) => ({ t, e: E(e), ...(x || {}) })), ...extra });
+const { E, S, esc, esl } = require('./questionarios/dsl');
 
 const PERGUNTAS = [
   esl('q1', 'deus', 'Sobre deuses ou realidades divinas, qual afirmação se aproxima mais do que você pensa?', [
@@ -209,14 +205,41 @@ const PERGUNTAS = [
 
 const QMAP = Object.fromEntries(PERGUNTAS.map(q => [q.id, q]));
 
+/** Traços complementares: aparecem no perfil, mas NÃO entram na comparação (o banco não tem dado equivalente nas tradições). */
+const TRACOS = {
+  livre_arbitrio: { nome: 'Livre-arbítrio', esq: 'Nada é livre', dir: 'Escolhas realmente livres' },
+  destino: { nome: 'Destino', esq: 'Sem plano prévio', dir: 'Vida segue um plano traçado' },
+  experiencia: { nome: 'Experiências espirituais', esq: 'Nenhuma marcante', dir: 'Frequentes ou marcantes' },
+  misticismo: { nome: 'Misticismo', esq: 'Abordagem racional', dir: 'Abordagem mística' },
+  milagres: { nome: 'Milagres', esq: 'Sem eventos extraordinários', dir: 'Eventos extraordinários reais' },
+  tradicionalismo: { nome: 'Apego à tradição', esq: 'Renovação', dir: 'Preservação' },
+  ascetismo: { nome: 'Ascetismo', esq: 'Aceita os prazeres do mundo', dir: 'Valoriza renúncia e disciplina' },
+  proselitismo: { nome: 'Missão e testemunho', esq: 'Fé reservada', dir: 'Compartilhar ativamente' },
+  escatologia: { nome: 'Fim dos tempos', esq: 'Sem fim histórico', dir: 'História caminha para um desfecho' },
+};
+
+// ---- registro de versões (cada versão tem perguntas próprias; a ordem de cada array é parte do código de compartilhamento) ----
+const VERSOES = {};
+function registrar(id, def) {
+  const perguntas = def.perguntas; const ids = new Set();
+  for (const q of perguntas) { if (ids.has(q.id)) throw new Error(`pergunta duplicada ${id}/${q.id}`); ids.add(q.id); }
+  VERSOES[id] = { id, ...def, n: perguntas.length, qmap: Object.fromEntries(perguntas.map(q => [q.id, q])) };
+}
+registrar('v1', { nome: 'Rápido', curto: '44 perguntas', descricao: 'A versão original, preservada integralmente: 44 perguntas, cerca de 10 minutos.', minutos: 10, minimo: 8, recomendado: 20, perguntas: PERGUNTAS });
+registrar('v128', { nome: 'Completo', curto: '128 perguntas', descricao: 'Análise mais aprofundada: cobre os 10 temas com perguntas próprias, incluindo textos sagrados, filosofia e movimentos modernos. Cerca de 25 minutos.', minutos: 25, minimo: 24, recomendado: 62, perguntas: require('./questionarios/v128') });
+registrar('v244', { nome: 'Acadêmico', curto: '244 perguntas', descricao: 'Máxima profundidade: explora nuances que as outras versões não tocam: dilemas, cenários, práticas concretas, filosofia e traços de temperamento espiritual. Cerca de 50 minutos.', minutos: 50, minimo: 40, recomendado: 120, perguntas: require('./questionarios/v244') });
+const versao = id => VERSOES[id || 'v1'] || null;
+const listaVersoes = () => Object.values(VERSOES).map(v => ({ id: v.id, nome: v.nome, curto: v.curto, n: v.n, descricao: v.descricao, minutos: v.minutos, minimo: v.minimo, recomendado: v.recomendado }));
+
 /** Perguntas para o cliente: sem efeitos (a avaliação é feita no servidor), com as dimensões que cada uma informa. */
-function perguntasPublicas() {
-  return PERGUNTAS.map((q, i) => {
+function perguntasPublicas(vid = 'v1') {
+  const V = versao(vid);
+  return V.perguntas.map((q, i) => {
     const dims = new Set();
     (q.tipo === 'escolha' ? q.opcoes.flatMap(o => o.e) : q.efeitos.flat()).forEach(e => dims.add(e.dim));
     const tema = TEMAS.find(t => t.id === q.tema);
     return {
-      id: q.id, n: i + 1, tema: q.tema, tema_nome: tema.nome, tipo: q.tipo, texto: q.texto, ajuda: q.ajuda || null,
+      id: q.id, n: i + 1, tema: q.tema, tema_nome: tema.nome, sub: q.sub || null, tipo: q.tipo, texto: q.texto, ajuda: q.ajuda || null,
       opcoes: q.tipo === 'escolha' ? q.opcoes.map((o, k) => ({ i: k + 1, t: o.t })) : undefined,
       dimensoes: [...dims], traco: q.traco || null,
     };
@@ -224,11 +247,12 @@ function perguntasPublicas() {
 }
 
 /** respostas: { q1: 3, q2: 0, ... }  (escolha: índice 1..n; escala: 1..5; 0/ausente = pulou) */
-function avaliar(respostas) {
+function avaliar(respostas, vid = 'v1') {
+  const V = versao(vid);
   const massas = {};       // dim -> { opcao: massa }
-  const tracos = {}; const tracosFlags = {}; const naExplicito = new Set();
-  let respondidas = 0, informativas = 0; const porTema = {};
-  for (const q of PERGUNTAS) {
+  const tracosSoma = {}; const tracosFlags = {}; const naExplicito = new Set();
+  let respondidas = 0, informativas = 0; const porTema = {}, evidencias = {};
+  for (const q of V.perguntas) {
     const v = Number(respostas?.[q.id]); if (!Number.isInteger(v) || v <= 0) continue;
     let efeitos = null;
     if (q.tipo === 'escolha') {
@@ -238,32 +262,37 @@ function avaliar(respostas) {
       if (o.na) naExplicito.add(o.na);
     } else {
       if (v < 1 || v > 5) continue; respondidas++;
-      if (q.traco) tracos[q.traco] = (v - 1) * 25;
+      if (q.traco) { const x = (v - 1) * 25; (tracosSoma[q.traco] ??= []).push(q.inv ? 100 - x : x); }
       efeitos = q.efeitos[v - 1];
     }
     porTema[q.tema] = (porTema[q.tema] || 0) + 1;
     if (!efeitos || !efeitos.length) continue;
     informativas++;
     const p = q.p ?? 1;
-    for (const e of efeitos) { ((massas[e.dim] ??= {})[e.opcao] ??= 0); massas[e.dim][e.opcao] += e.massa * p; }
+    const vistas = new Set();
+    for (const e of efeitos) { ((massas[e.dim] ??= {})[e.opcao] ??= 0); massas[e.dim][e.opcao] += e.massa * p; vistas.add(e.dim); }
+    for (const d of vistas) evidencias[d] = (evidencias[d] || 0) + 1;
   }
+  const tracos = Object.fromEntries(Object.entries(tracosSoma).map(([k, a]) => [k, a.reduce((x, y) => x + y, 0) / a.length]));
   const respostasCompat = {};
   for (const [dim, m] of Object.entries(massas)) respostasCompat[dim] = { opcoes: m, importancia: 2 };
-  return { respostasCompat, massas, tracos, tracosFlags, naExplicito: [...naExplicito], respondidas, informativas, porTema, total: PERGUNTAS.length };
+  return { respostasCompat, massas, tracos, tracosFlags, naExplicito: [...naExplicito], respondidas, informativas, porTema, evidencias, total: V.perguntas.length, versao: V.id };
 }
 
-/** Código compartilhável v1: 1 caractere base36 por pergunta (0=pulou) + '-' + 1 dígito (1..3) por tema. */
-function codificar(respostas, importancias = {}) {
-  const r = PERGUNTAS.map(q => { const v = Number(respostas?.[q.id]); return Number.isInteger(v) && v > 0 && v < 36 ? v.toString(36) : '0'; }).join('');
+/** Código compartilhável: '<versão>-' + 1 caractere base36 por pergunta (0=pulou) + '-' + 1 dígito (1..3) por tema. */
+function codificar(respostas, importancias = {}, vid = 'v1') {
+  const V = versao(vid);
+  const r = V.perguntas.map(q => { const v = Number(respostas?.[q.id]); return Number.isInteger(v) && v > 0 && v < 36 ? v.toString(36) : '0'; }).join('');
   const im = TEMAS.map(t => Math.min(3, Math.max(1, Math.round(Number(importancias?.[t.id]) || 2)))).join('');
-  return `v1-${r}-${im}`;
+  return `${V.id}-${r}-${im}`;
 }
 function decodificar(codigo) {
-  const m = /^v1-([0-9a-z]+)-([1-3]+)$/.exec(String(codigo || '').toLowerCase());
+  const m = /^(v1|v128|v244)-([0-9a-z]+)-([1-3]+)$/.exec(String(codigo || '').toLowerCase());
   if (!m) return null;
+  const V = versao(m[1]); if (m[2].length > V.n) return null;
   const respostas = {}, importancias = {};
-  PERGUNTAS.forEach((q, i) => { const c = m[1][i]; if (c && c !== '0') respostas[q.id] = parseInt(c, 36); });
-  TEMAS.forEach((t, i) => { importancias[t.id] = Number(m[2][i]) || 2; });
-  return { respostas, importancias };
+  V.perguntas.forEach((q, i) => { const c = m[2][i]; if (c && c !== '0') respostas[q.id] = parseInt(c, 36); });
+  TEMAS.forEach((t, i) => { importancias[t.id] = Number(m[3][i]) || 2; });
+  return { respostas, importancias, versao: V.id };
 }
-module.exports = { PERGUNTAS, QMAP, TEMAS, TEMA_DE_DIM, perguntasPublicas, avaliar, codificar, decodificar };
+module.exports = { PERGUNTAS, QMAP, TEMAS, TEMA_DE_DIM, TRACOS, VERSOES, versao, listaVersoes, perguntasPublicas, avaliar, codificar, decodificar };

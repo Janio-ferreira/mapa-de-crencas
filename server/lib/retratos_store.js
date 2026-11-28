@@ -44,8 +44,9 @@ function armazenar(slug, buffer, miniaturaBuffer) {
 }
 const caminhoDe = url => path.join(DIR, url.slice(URL_BASE.length + 1));
 
-function lerManifesto() { try { return JSON.parse(fs.readFileSync(MANIFESTO, 'utf8')); } catch { return []; } }
-function gravarManifesto(lista) { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(MANIFESTO, JSON.stringify(lista, null, 2)); }
+const { lerJSON, gravarJSON } = require('./json_seguro');
+function lerManifesto() { return lerJSON(MANIFESTO, []); }
+function gravarManifesto(lista) { gravarJSON(MANIFESTO, lista); }
 function registrarNoManifesto(rec) {
   const l = lerManifesto().filter(x => !(x.entidade_slug === rec.entidade_slug && x.arquivo_url === rec.arquivo_url));
   l.push(rec); gravarManifesto(l);
@@ -62,7 +63,7 @@ function verificarArquivos() {
 /** Recria no banco os registros do manifesto cujos arquivos locais são válidos. */
 function reimportar() {
   const imagens = require('./imagens'); const { ok } = verificarArquivos(); let n = 0;
-  for (const r of ok) { try { const { sha256, ...rec } = r; imagens.cadastrar(rec); n++; } catch { /* personalidade removida do catálogo */ } }
+  for (const r of ok) { if (r.removida) continue; try { const { sha256, ...rec } = r; if (require('./db').db.prepare('SELECT 1 FROM imagens WHERE entidade_tipo=? AND entidade_slug=? AND arquivo_url=?').get(rec.entidade_tipo, rec.entidade_slug, rec.arquivo_url)) continue; imagens.cadastrar(rec); n++; } catch { /* personalidade removida do catálogo */ } }
   imagens.invalidar(); return n;
 }
-module.exports = { DIR, URL_BASE, validarBuffer, armazenar, lerManifesto, registrarNoManifesto, verificarArquivos, reimportar, caminhoDe };
+module.exports = { gravarManifesto, DIR, URL_BASE, validarBuffer, armazenar, lerManifesto, registrarNoManifesto, verificarArquivos, reimportar, caminhoDe };

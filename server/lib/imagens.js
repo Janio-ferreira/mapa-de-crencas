@@ -37,7 +37,7 @@ const PAPEIS = ['foto', 'monumento', 'retrato', 'capa', 'simbolo', 'mapa', 'band
 
 function urlPermitida(u) {
   if (typeof u !== 'string') return false;
-  if (/^\/(img|images\/personalidades)\/[\w\-./]+$/.test(u) && !u.includes('..')) return true;
+  if (/^\/(img|images\/personalidades|images\/tradicoes)\/[\w\-./]+$/.test(u) && !u.includes('..')) return true;
   try { const x = new URL(u); return x.protocol === 'https:' && HOSTS.has(x.hostname); } catch { return false; }
 }
 function validar(i) {

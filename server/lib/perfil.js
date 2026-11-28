@@ -64,9 +64,10 @@ function pesosDosEixos(importancias) {
   return out;
 }
 
-function resultado({ respostas, importancias = {}, incluirTodas = false } = {}) {
-  const av = Q.avaliar(respostas);
-  if (av.respondidas < 8) { const e = new Error('Responda pelo menos 8 perguntas para gerar um perfil.'); e.status = 400; throw e; }
+function resultado({ respostas, importancias = {}, incluirTodas = false, versao: vid = 'v1' } = {}) {
+  const V = Q.versao(vid); if (!V) { const e = new Error('Versão de questionário desconhecida.'); e.status = 400; throw e; }
+  const av = Q.avaliar(respostas, V.id);
+  if (av.respondidas < V.minimo) { const e = new Error(`Responda pelo menos ${V.minimo} perguntas para gerar um perfil.`); e.status = 400; throw e; }
   if (av.informativas < 5) { const e = new Error('Suas respostas foram neutras ou puladas demais: responda mais perguntas com uma posição para gerar o perfil.'); e.status = 400; throw e; }
   const imp = {}; Q.TEMAS.forEach(t => { imp[t.id] = Math.min(3, Math.max(1, Math.round(Number(importancias?.[t.id]) || 2))); });
   const resp = {};
@@ -76,7 +77,7 @@ function resultado({ respostas, importancias = {}, incluirTodas = false } = {}) 
   const ua = eixos.eixosDoUsuario(resp);
   for (const na of av.naExplicito) if (ua[na]?.status !== 'ok') ua[na] = { status: 'nao_se_aplica', cobertura: 1, explicito: true };
   const pesos = pesosDosEixos(imp);
-  const PUB = Q.perguntasPublicas();
+  const PUB = Q.perguntasPublicas(V.id);
   const eixosUsuario = eixos.AXES.map(ax => {
     const u = ua[ax.id]; const dims = ax.fontes.map(f => f.dim);
     const base = PUB.filter(q => respostas[q.id] > 0 && q.dimensoes.some(d => dims.includes(d))).length;
@@ -196,14 +197,22 @@ function resultado({ respostas, importancias = {}, incluirTodas = false } = {}) 
 
   // --- traços complementares e tensões
   const tracos = [];
-  if (av.tracos.livre_arbitrio != null) tracos.push({ id: 'livre_arbitrio', nome: 'Livre-arbítrio', valor: av.tracos.livre_arbitrio, esq: 'Nada é livre', dir: 'Escolhas realmente livres' });
-  if (av.tracos.destino != null) tracos.push({ id: 'destino', nome: 'Destino', valor: av.tracos.destino, esq: 'Sem plano prévio', dir: 'Vida segue um plano traçado' });
-  if (av.tracos.experiencia != null) tracos.push({ id: 'experiencia', nome: 'Experiências espirituais', valor: av.tracos.experiencia, esq: 'Nenhuma marcante', dir: 'Frequentes ou marcantes' });
+  for (const [id, def] of Object.entries(Q.TRACOS)) if (av.tracos[id] != null) tracos.push({ id, nome: def.nome, valor: Math.round(av.tracos[id]), esq: def.esq, dir: def.dir });
   const tensoes = [];
   for (const [dim, m] of Object.entries(av.massas)) {
     const tot = Object.values(m).reduce((a, b) => a + b, 0); const ps = Object.values(m).map(x => x / tot).filter(x => x >= 0.28);
     if (ps.length >= 2 && Object.keys(m).length >= 2) tensoes.push(C.porChave[dim]?.nome);
   }
+
+  // --- leitura detalhada por dimensão doutrinária (distribuição das suas respostas) e cobertura por tema
+  const dimsDet = Object.entries(av.massas).map(([dim, m]) => {
+    const D = C.porChave[dim]; if (!D) return null;
+    const tot = Object.values(m).reduce((x, y) => x + y, 0); if (!(tot > 0)) return null;
+    const opcoes = D.opcoes.filter(o => m[o.chave] > 0).map(o => ({ chave: o.chave, nome: o.nome, pct: Math.round(m[o.chave] / tot * 100) })).sort((x, y) => y.pct - x.pct);
+    const forca = opcoes[0].pct >= 65 ? 'firme' : (opcoes[1] && opcoes[1].pct >= 28 ? 'dividida' : 'moderada');
+    return { dim, nome: D.nome, tema: Q.TEMA_DE_DIM[dim], perguntas: av.evidencias[dim] || 0, dominante: opcoes[0].nome, forca, opcoes: opcoes.slice(0, 4) };
+  }).filter(Boolean).sort((x, y) => Q.TEMAS.findIndex(t => t.id === x.tema) - Q.TEMAS.findIndex(t => t.id === y.tema));
+  const cobertura = Q.TEMAS.map(t => ({ id: t.id, nome: t.nome, respondidas: av.porTema[t.id] || 0, total: V.perguntas.filter(q => q.tema === t.id).length }));
 
   // --- imagens e símbolos (só imagens verificadas; sem imagem -> símbolo/ilustração no front)
   const enr = t => ({ ...t, imagem: imagens.principal('tradicao', t.slug, ['foto', 'monumento']), simbolo: imagens.simboloDe(t.slug), origem: meta[t.slug]?.origem_lat != null ? { texto: meta[t.slug].origem_texto, lat: meta[t.slug].origem_lat, lng: meta[t.slug].origem_lng } : null });
@@ -217,7 +226,8 @@ function resultado({ respostas, importancias = {}, incluirTodas = false } = {}) 
     ...pensadoresF.slice(0, 4).flatMap(p => String(p.obras || '').split(';').map(x => x.trim()).filter(Boolean).slice(0, 2).map(o => ({ tipo: 'obra', titulo: o, subtipo: 'obra de pensador', autor: p.nome, periodo: p.vida, descricao: null, tradicao: p.tradicao, tradicao_slug: p.tradicao_slug, relacao: `Obra de ${p.nome}, com ${p.similaridade}% de afinidade com seu perfil.`, imagem: null }))),
   ];
   const out = {
-    versao: 'v1', codigo: Q.codificar(respostas, imp), respondidas: av.respondidas, total_perguntas: av.total, provisorio: av.respondidas < 20,
+    versao: V.id, versao_nome: V.nome, codigo: Q.codificar(respostas, imp, V.id), respondidas: av.respondidas, total_perguntas: av.total, provisorio: av.respondidas < V.recomendado, recomendado: V.recomendado,
+    detalhes_dimensoes: dimsDet, cobertura_temas: cobertura,
     importancias: imp, temas: Q.TEMAS, classificacao, eixos: eixosUsuario, tracos, agnostico: !!av.tracosFlags.agnosticismo,
     ranking: { geral, religioes: religioes.map(enr), ramos: ramos.map(enr), movimentos, por_eixo: porEixoProx, mais_distantes: distantes },
     distintivo: { distinguem, comuns, todos: distintivo },

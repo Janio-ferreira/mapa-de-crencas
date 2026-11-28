@@ -9,6 +9,9 @@
   "scripts": {
     "start": "node --no-warnings server/app.js",
     "retratos": "node --no-warnings scripts/retratos.js sincronizar",
+    "imagens:validar": "node --no-warnings scripts/importar-pacote.js validar",
+    "imagens:importar": "node --no-warnings scripts/importar-pacote.js importar",
+    "imagens:auditar": "node --no-warnings scripts/importar-pacote.js auditar",
     "seed": "node --no-warnings server/seed/index.js --reset",
     "test": "node --no-warnings --test test/*.test.js"
   },

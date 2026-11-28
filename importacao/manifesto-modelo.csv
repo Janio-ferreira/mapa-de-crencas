@@ -1,0 +1,10 @@
+# MODELO DE MANIFESTO. Copie este arquivo para a pasta do pacote com o nome "manifesto.csv" e preencha uma linha por imagem.
+# Linhas iniciadas por # são ignoradas. Separador: vírgula ou ponto e vírgula. Use aspas se o texto tiver o separador.
+# Colunas obrigatórias: arquivo, entidade_tipo, entidade_slug, papel, alt, autor, licenca, fonte_nome, fonte_url
+# Para pessoas (papel=retrato) também: tipo_representacao e instituicao.  Opcionais: licenca_url, titulo, data_acesso, nota.
+# entidade_tipo: tradicao | pensador | figura | texto | regiao   (slugs exatos: veja lista-de-tradicoes.csv e lista-de-pessoas.csv)
+# papel: foto | monumento | retrato | capa | simbolo | mapa | bandeira
+# licenca aceita: Public domain, CC0, CC BY 4.0, CC BY-SA 4.0 (qualquer versão). Qualquer outra é recusada.
+# tipo_representacao: fotografia | pintura | gravura | escultura | desenho | medalha | iluminura | relevo | outro
+# NÃO existe coluna de aprovação: toda imagem entra como "não verificada" e só uma pessoa a libera no painel admin.
+arquivo,entidade_tipo,entidade_slug,papel,alt,autor,licenca,licenca_url,fonte_nome,fonte_url,titulo,tipo_representacao,instituicao,data_acesso,nota

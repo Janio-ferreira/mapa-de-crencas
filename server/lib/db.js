@@ -11,6 +11,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data'
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'mapa.db');
 
+if (DB_FILE !== ':memory:' && !DB_FILE.startsWith('file:')) fs.mkdirSync(path.dirname(path.resolve(DB_FILE)), { recursive: true });   // pasta do banco sempre existe (evita "unable to open database file")
 const db = new DatabaseSync(DB_FILE);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');

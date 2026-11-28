@@ -33,12 +33,17 @@ test('sincronização com Wikidata/Commons simulados: baixa, guarda local, regis
   try {
     const r = await R.sincronizar({ slugs: ['lutero'] });
     assert.equal(r.ok.length, 1, JSON.stringify(r));
-    I.invalidar(); const im = I.imagensDe('pensador', 'lutero');
+    I.invalidar(); assert.equal(I.imagensDe('pensador', 'lutero').length, 0, 'candidato automático NÃO é exibido sem aprovação humana');
+    const { db: dbh } = require('../server/lib/db'); assert.equal(dbh.prepare("SELECT verificada FROM imagens WHERE entidade_slug='lutero'").get().verificada, 0);
+    dbh.prepare("UPDATE imagens SET verificada=1 WHERE entidade_slug='lutero'").run(); I.invalidar();   // aprovação humana simulada
+    const im = I.imagensDe('pensador', 'lutero');
     assert.equal(im.length, 1); assert.match(im[0].url, /^\/images\/personalidades\/lutero\//);
     assert.equal(im[0].tipo_representacao, 'pintura'); assert.equal(im[0].licenca, 'Public domain'); assert.equal(im[0].autor, 'Pintor X');
     assert.equal(S.verificarArquivos().invalidos.length, 0);
     // reconstrói do manifesto depois de perder o banco
+    require('../server/lib/db').db.prepare('DELETE FROM imagens').run(); I.invalidar();
     assert.ok(S.reimportar() >= 1);
+    assert.equal(S.reimportar(), 0, 'reimportar não sobrescreve registros existentes (preserva aprovação humana)');
   } finally { global.fetch = real; }
 });
 
@@ -81,6 +86,7 @@ test('figura com datas na descrição é sincronizada (Wikidata simulado) e o re
   };
   try {
     const r = await R.sincronizar({ slugs: [alvo.slug] }); assert.equal(r.ok.length, 1, JSON.stringify([alvo, r])); I.invalidar();
+    require('../server/lib/db').db.prepare('UPDATE imagens SET verificada=1 WHERE entidade_slug=?').run(alvo.slug); I.invalidar();   // aprovação humana simulada
     const linha = P.relatorio().find(x => x.slug === alvo.slug); assert.equal(linha.status, 'com_retrato'); assert.match(linha.url, /^\/images\/personalidades\//);
   } finally { global.fetch = real; }
 });

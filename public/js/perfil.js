@@ -3,13 +3,13 @@
 import { simbolo, simboloComoSVG, emblemaPerfil, emblemaComoSVG, padrao, corDe, hash } from './simbolos.js';
 export function registrar({ h, raw, render, api, main, store, toast, loading, pageTitle, CAT, SIT, cached }) {
   const $ = (s, r = document) => r.querySelector(s);
-  const CHAVE = 'perfil_v1';
+  const chaveDe = v => (!v || v === 'v1') ? 'perfil_v1' : 'perfil_' + v;   // v1 mantém a chave antiga (respostas já salvas continuam valendo)
   const est0 = () => ({ r: {}, i: 0, imp: {}, seed: Math.floor(Math.random() * 1e9) });
-  const carregar = () => { const e = store.get(CHAVE, null); return e && e.r ? e : est0(); };
-  const salvar = e => store.set(CHAVE, e);
+  const carregarV = v => { const e = store.get(chaveDe(v), null); return e && e.r ? e : est0(); };
+  const salvarV = (e, v) => store.set(chaveDe(v), e);
 
   // ---- código compartilhável (espelha server/lib/questionario.js)
-  const codificar = (Qd, r, imp) => 'v1-' + Qd.perguntas.map(q => { const v = +r[q.id]; return Number.isInteger(v) && v > 0 && v < 36 ? v.toString(36) : '0'; }).join('') + '-' + Qd.temas.map(t => Math.min(3, Math.max(1, +imp[t.id] || 2))).join('');
+  const codificar = (Qd, r, imp) => Qd.versao + '-' + Qd.perguntas.map(q => { const v = +r[q.id]; return Number.isInteger(v) && v > 0 && v < 36 ? v.toString(36) : '0'; }).join('') + '-' + Qd.temas.map(t => Math.min(3, Math.max(1, +imp[t.id] || 2))).join('');
   const urlResultado = code => location.origin + location.pathname + '#/resultado?r=' + code;
 
   // ---- monograma determinístico (NÃO é emblema oficial: não há imagem livre confiável para todas as tradições)
@@ -44,27 +44,32 @@ export function registrar({ h, raw, render, api, main, store, toast, loading, pa
   // ---------------- INTRO ----------------
   async function intro() {
     pageTitle('Meu Perfil Religioso');
-    const Qd = await cached('perfilQ', () => api('/perfil/questionario'));
-    const est = carregar(); const n = Object.keys(est.r).length;
+    const { versoes } = await cached('perfilV', () => api('/perfil/versoes'));
     render(main, h`<section class="perfil-intro"><div class="hero-perfil">
-      <span class="kicker">Questionário · 12 eixos</span>
+      <span class="kicker">Questionário · 12 eixos · 3 versões</span>
       <h1>Meu Perfil Religioso</h1>
-      <p class="lead">Responda a ${Qd.perguntas.length} perguntas sobre o que você pensa de Deus, alma, morte, ética, rituais e outras religiões. Você recebe um mapa de suas posições em 12 eixos — e vê de quais tradições, denominações, pensadores e escolas elas mais se aproximam.</p>
-      <div class="meta" style="gap:.6rem"><a class="btn" href="#/perfil/teste" id="ini">${n ? 'Continuar o questionário' : 'Começar'}</a>${n ? h`<button class="btn sec" id="rs">Recomeçar</button>` : ''}<a class="btn sec" href="#/teste">Teste rápido (14 temas)</a></div></div>
+      <p class="lead">Responda a perguntas sobre o que você pensa de Deus, alma, morte, ética, rituais, textos sagrados e outras religiões. Você recebe um mapa de suas posições em 12 eixos — e vê de quais tradições, denominações, pensadores e escolas elas mais se aproximam. Escolha a profundidade que preferir: as três versões têm perguntas próprias e comparam com o mesmo catálogo.</p></div>
+      <div class="grade tres" id="versoes">${versoes.map(v => { const est = carregarV(v.id); const n = Object.values(est.r).filter(x => x > 0).length; return h`<article class="cartao versao" data-v="${v.id}">
+        <span class="tag">${v.curto} · ~${v.minutos} min</span><h3>${v.nome}</h3><p>${v.descricao}</p>
+        <p class="desconhecido" style="margin:.2rem 0">Mínimo ${v.minimo} respostas para gerar o perfil; ${v.recomendado}+ recomendado.${n ? ` Você já respondeu ${n}.` : ''}</p>
+        <div class="meta" style="gap:.5rem"><a class="btn" href="#/perfil/teste?v=${v.id}">${n ? 'Continuar' : 'Começar'}</a>${n ? h`<button class="btn sec" data-rs="${v.id}">Recomeçar</button>` : ''}</div></article>`; })}</div>
+      <div class="meta" style="gap:.6rem;margin-top:1rem"><a class="btn sec" href="#/teste">Teste rápido (14 temas)</a></div>
       <div class="grade tres">
         <div class="cartao"><h3>Sem forçar uma religião</h3><p>Seu resultado pode ser uma posição mista, independente, agnóstica, atéia, espiritualista ou não religiosa. O nome do perfil descreve suas ideias, não um pertencimento.</p></div>
         <div class="cartao"><h3>Explicável</h3><p>Cada posição mostra de quais respostas veio; cada tradição mostra por que aparece, onde concorda, onde diverge e o que ainda não está documentado.</p></div>
         <div class="cartao"><h3>Todo o catálogo</h3><p>A comparação usa todas as tradições do banco; as novas entram automaticamente quando têm dados doutrinários.</p></div></div>
-      <div class="aviso info"><strong>Como interpretar.</strong> O resultado mede <em>proximidade de ideias</em> com modelos doutrinários catalogados. Não indica qual religião é verdadeira ou melhor, nem se uma instituição o(a) aceitaria, nem recomenda conversão. Todas as perguntas são opcionais (mínimo de ${Qd.minimo} para gerar o perfil; ${Qd.recomendado}+ recomendado).</div>
-      <div class="aviso"><strong>Privacidade.</strong> Suas respostas ficam só neste navegador. O link e o QR Code do resultado carregam suas respostas codificadas: quem receber o link poderá ver seu perfil. Compartilhe só se quiser.</div></section>`);
-    const rs = $('#rs'); if (rs) rs.onclick = () => { salvar(est0()); intro(); };
+      <div class="aviso info"><strong>Como interpretar.</strong> O resultado mede <em>proximidade de ideias</em> com modelos doutrinários catalogados. Não indica qual religião é verdadeira ou melhor, nem se uma instituição o(a) aceitaria, nem recomenda conversão. Todas as perguntas são opcionais. A versão aprofundada mede as mesmas dimensões com mais evidências e acrescenta traços de temperamento espiritual; ela não altera o que as tradições afirmam.</div>
+      <div class="aviso"><strong>Privacidade.</strong> Suas respostas ficam só neste navegador (cada versão guarda as suas). O link e o QR Code do resultado carregam suas respostas codificadas: quem receber o link poderá ver seu perfil. Compartilhe só se quiser.</div></section>`);
+    document.querySelectorAll('[data-rs]').forEach(b => b.onclick = () => { salvarV(est0(), b.dataset.rs); intro(); });
   }
 
   // ---------------- QUESTIONÁRIO ----------------
   const mulberry = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-  async function questionario() {
+  async function questionario(params) {
     pageTitle('Questionário');
-    const Qd = await cached('perfilQ', () => api('/perfil/questionario'));
+    const V = (params && params.get && params.get('v')) || 'v1';
+    const carregar = () => carregarV(V), salvar = e => salvarV(e, V);
+    let Qd; try { Qd = await cached('perfilQ_' + V, () => api('/perfil/questionario?versao=' + encodeURIComponent(V))); } catch (e) { toast(e.message); location.hash = '#/perfil'; return; }
     const est = carregar(); const P = Qd.perguntas; if (est.i >= P.length || est.i < 0) est.i = 0;
     const respondidas = () => Object.values(est.r).filter(v => v > 0).length;
     function passo() {
@@ -77,7 +82,7 @@ export function registrar({ h, raw, render, api, main, store, toast, loading, pa
         corpo = h`<div class="escala" role="radiogroup" aria-label="${q.texto}">${Qd.escala.map((t, k) => h`<label class="${cur === k + 1 ? 'sel' : ''}"><input type="radio" name="r" value="${k + 1}" ${cur === k + 1 ? raw('checked') : ''}><span class="bolha">${k + 1}</span><small>${t}</small></label>`)}</div>`;
       }
       const ult = est.i === P.length - 1;
-      render(main, h`<div class="passo"><div class="meta"><span class="tag">Pergunta ${q.n} de ${P.length}</span><span class="tag">${q.tema_nome}</span><span class="desconhecido" style="margin:0">${respondidas()} respondida(s)</span></div>
+      render(main, h`<div class="passo"><div class="meta"><span class="tag">${Qd.nome} · pergunta ${q.n} de ${P.length}</span><span class="tag">${q.tema_nome}</span>${q.sub ? h`<span class="tag">${q.sub}</span>` : ''}<span class="desconhecido" style="margin:0">${respondidas()} respondida(s)</span></div>
         <div class="progresso" role="progressbar" aria-valuemin="0" aria-valuemax="${P.length}" aria-valuenow="${q.n - 1}"><i style="width:${(q.n - 1) / P.length * 100}%"></i></div>
         <h2>${q.texto}</h2>${q.ajuda ? h`<p class="desconhecido">${q.ajuda}</p>` : ''}${corpo}
         <div class="meta" style="gap:.6rem;margin-top:1.2rem"><button class="btn sec" id="vt" ${est.i ? '' : 'disabled'}>Voltar</button><button class="btn" id="pr">${ult ? 'Ver resultado' : 'Próxima'}</button><button class="btn sec" id="pu">Prefiro pular</button>
@@ -208,9 +213,10 @@ export function registrar({ h, raw, render, api, main, store, toast, loading, pa
   async function resultado(params) {
     const code = params.get('r'); if (!code) { location.hash = '#/perfil'; return; }
     pageTitle('Resultado do perfil');
-    const Qd = await cached('perfilQ', () => api('/perfil/questionario'));
     let r; try { r = await api('/perfil/resultado/' + encodeURIComponent(code)); } catch (e) {
-      render(main, h`<div class="passo"><div class="aviso erro"><strong>Não foi possível gerar o resultado.</strong> ${e.message}</div><a class="btn" href="#/perfil/teste">Responder o questionário</a></div>`); return; }
+      render(main, h`<div class="passo"><div class="aviso erro"><strong>Não foi possível gerar o resultado.</strong> ${e.message}</div><a class="btn" href="#/perfil">Responder o questionário</a></div>`); return; }
+    const V = r.versao; const carregar = () => carregarV(V), salvar = e => salvarV(e, V);
+    const Qd = await cached('perfilQ_' + V, () => api('/perfil/questionario?versao=' + encodeURIComponent(V)));
     const url = urlResultado(r.codigo); const cl = r.classificacao; const top = r.ranking.geral.slice(0, 3);
     const eixoRow = e => e.status === 'ok' ? h`<article class="eixo"><div class="eixo-cab"><h3>${e.n}. ${e.nome}</h3><span class="eixo-pos"><strong>${e.posicao}</strong> · ${Math.round(e.valor)}/100</span></div>${trilho(e)}
         <details class="det"><summary>Entenda esta posição</summary><p>${e.explicacao}</p>
@@ -225,14 +231,14 @@ export function registrar({ h, raw, render, api, main, store, toast, loading, pa
     render(main, h`<div class="res-layout"><aside class="lateral" aria-label="Seções do resultado"><strong class="kicker">Seu resultado</strong><nav>${SEC.map(([id, n]) => h`<a href="#/resultado?r=${r.codigo}" data-alvo="${id}">${n}</a>`)}</nav></aside>
      <div class="resultado-perfil">
       <section id="sec-perfil" class="cartao hero-res"><div class="hero-arte">${raw(emblemaPerfil(cl.id || 'humanista-religioso', 230))}<div class="hero-simbolos">${top.map(simbPill)}</div><small>Ilustração abstrata original; não representa pessoa nem fato histórico.</small></div>
-        <div class="hero-texto"><span class="kicker">Meu Perfil Religioso${r.provisorio ? ' · provisório' : ''}</span>
+        <div class="hero-texto"><span class="kicker">Meu Perfil Religioso · ${r.total_perguntas} perguntas${r.provisorio ? ' · provisório' : ''}</span>
         <h1>${cl.nome}</h1>
         <div class="hero-pct">${cl.similaridade != null ? anel(cl.similaridade, 84) : ''}<p class="desconhecido" style="margin:0">${cl.similaridade != null ? 'semelhança com este perfil descritivo' : ''}${cl.candidatos.length > 1 ? ' · também próximo de: ' + cl.candidatos.slice(1, 3).map(c => `${c.nome} (${c.pct}%)`).join(', ') : ''}</p></div>
         <p class="lead">${cl.descricao}</p><p><strong>Em uma frase:</strong> ${cl.sintese}</p>
         ${top.length ? h`<div class="top3">${top.map(t => h`<a href="#/tradicao/${t.slug}">${simbPill(t)}<b>${t.compatibilidade}%</b><span>${t.nome}</span></a>`)}</div>` : ''}
         <p class="desconhecido">${cl.aviso}</p>
         ${r.provisorio ? h`<div class="aviso">Perfil <strong>provisório</strong>: você respondeu ${r.respondidas} de ${r.total_perguntas} perguntas. Responder mais torna o resultado mais estável.</div>` : ''}
-        <div class="meta acoes" style="gap:.5rem"><button class="btn" id="cartaoBtn">Compartilhar cartão</button><button class="btn sec" id="copiar">Copiar link</button><button class="btn sec" id="imprimir">Imprimir / PDF</button><button class="btn sec" id="exportar">Exportar JSON</button><a class="btn sec" href="#/perfil/teste" id="editar">Editar respostas</a><button class="btn sec" id="refazer">Refazer</button></div></div></section>
+        <div class="meta acoes" style="gap:.5rem"><button class="btn" id="cartaoBtn">Compartilhar cartão</button><button class="btn sec" id="copiar">Copiar link</button><button class="btn sec" id="imprimir">Imprimir / PDF</button><button class="btn sec" id="exportar">Exportar JSON</button><a class="btn sec" href="#/perfil/teste?v=${r.versao}" id="editar">Editar respostas</a><button class="btn sec" id="refazer">Refazer</button></div></div></section>
       <div id="cartaoWrap" class="cartao" hidden><h3>Cartão para compartilhar</h3><p class="desconhecido">Contém seu perfil, os 12 eixos, as 3 tradições mais próximas e um QR Code. Quem abrir o link verá suas respostas codificadas.</p>
         <div class="meta" role="group" aria-label="Formato" style="gap:.5rem;margin-bottom:.8rem"><button class="btn peq" id="fVert" aria-pressed="true">Vertical (celular)</button><button class="btn sec peq" id="fQuad" aria-pressed="false">Quadrado</button></div>
         <div id="cv"></div><div class="meta" style="gap:.5rem;margin-top:.8rem"><button class="btn" id="baixar">Baixar imagem (PNG)</button><button class="btn sec" id="enviar">Compartilhar…</button></div></div>
@@ -242,7 +248,10 @@ export function registrar({ h, raw, render, api, main, store, toast, loading, pa
         <div class="eixos">${r.eixos.map(eixoRow)}</div>
         <details class="det" id="impBox"><summary>Ajustar a importância de cada tema</summary><p class="desconhecido">Temas mais importantes para você pesam mais na comparação com as tradições.</p>
           <div class="grade tres">${r.temas.map(t => h`<div class="campo"><label for="imp-${t.id}">${t.nome}</label><select id="imp-${t.id}" data-tema="${t.id}">${[[1, 'Pouca'], [2, 'Média'], [3, 'Muita']].map(([v, n]) => h`<option value="${v}" ${r.importancias[t.id] === v ? raw('selected') : ''}>${n}</option>`)}</select></div>`)}</div><button class="btn" id="recalc">Recalcular</button></details>
-        ${r.tracos.length ? h`<h3 style="margin-top:1.4rem">Traços complementares</h3><p class="desconhecido">Informam seu perfil, mas não entram na comparação (o banco não tem dado equivalente nas tradições).</p><div class="eixos">${r.tracos.map(t => h`<div class="eixo"><div class="eixo-cab"><h4>${t.nome}</h4></div><div class="eixo-trilho"><span class="polo esq">${t.esq}</span><div class="trilho"><i class="centro"></i><b class="marca" style="left:${t.valor}%"></b></div><span class="polo dir">${t.dir}</span></div></div>`)}</div>` : ''}</section>
+        ${r.tracos.length ? h`<h3 style="margin-top:1.4rem">Traços complementares</h3><p class="desconhecido">Informam seu perfil, mas não entram na comparação (o banco não tem dado equivalente nas tradições).</p><div class="eixos">${r.tracos.map(t => h`<div class="eixo"><div class="eixo-cab"><h4>${t.nome}</h4></div><div class="eixo-trilho"><span class="polo esq">${t.esq}</span><div class="trilho"><i class="centro"></i><b class="marca" style="left:${t.valor}%"></b></div><span class="polo dir">${t.dir}</span></div></div>`)}</div>` : ''}
+        ${r.detalhes_dimensoes?.length ? h`<h3 style="margin-top:1.4rem">Leitura por dimensão doutrinária</h3><p class="desconhecido">Como as suas respostas se distribuem em cada dimensão usada na comparação com as tradições (versão ${r.versao_nome}, ${r.total_perguntas} perguntas). “Dividida” indica respostas que apontam para mais de uma posição; isso é informação, não erro.</p>
+          <div class="grade tres">${r.detalhes_dimensoes.map(d => h`<div class="cartao dist"><div class="meta"><strong>${d.nome}</strong><span class="tag">${d.forca}</span></div><p style="margin:.3rem 0">${d.dominante} <small>(${d.perguntas} pergunta${d.perguntas === 1 ? '' : 's'})</small></p><small>${d.opcoes.map(o => `${o.nome} ${o.pct}%`).join(' · ')}</small></div>`)}</div>
+          <p class="desconhecido">Cobertura por tema: ${r.cobertura_temas.map(t => `${t.nome} ${t.respondidas}/${t.total}`).join(' · ')}.</p>` : ''}</section>
 
       <section id="sec-distingue"><h2>O que te distingue</h2><p class="desconhecido">Comparação com as tradições <em>praticadas</em> do catálogo (proporção que fica a até 15 pontos da sua posição). Incomum não significa errado: só mostra o quanto sua combinação é rara no banco.</p>
         <div class="grade">${r.distintivo.distinguem.map(distCard)}</div>
@@ -292,7 +301,7 @@ export function registrar({ h, raw, render, api, main, store, toast, loading, pa
     $('#imprimir').onclick = () => window.print();
     $('#exportar').onclick = () => baixar(new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' }), 'mapa-de-crencas-perfil.json');
     $('#refazer').onclick = () => { if (confirm('Apagar suas respostas e recomeçar?')) { salvar(est0()); location.hash = '#/perfil'; } };
-    $('#editar').onclick = () => { const d = (() => { const p = /^v1-([0-9a-z]+)-/.exec(r.codigo)[1]; const rr = {}; Qd.perguntas.forEach((q, i) => { const v = parseInt(p[i], 36); if (v > 0) rr[q.id] = v; }); return rr; })(); const e = carregar(); e.r = d; e.imp = r.importancias; e.i = 0; salvar(e); };
+    $('#editar').onclick = () => { const d = (() => { const p = /^v\d+-([0-9a-z]+)-/.exec(r.codigo)[1]; const rr = {}; Qd.perguntas.forEach((q, i) => { const v = parseInt(p[i], 36); if (v > 0) rr[q.id] = v; }); return rr; })(); const e = carregar(); e.r = d; e.imp = r.importancias; e.i = 0; salvar(e); };
     $('#recalc').onclick = async () => { const imp = {}; document.querySelectorAll('[data-tema]').forEach(s => { imp[s.dataset.tema] = +s.value; }); try { const n = await api('/perfil/resultado', { method: 'POST', body: { codigo: r.codigo, importancias: imp } }); const e = carregar(); e.imp = imp; salvar(e); location.hash = '#/resultado?r=' + n.codigo; } catch (e) { toast(e.message); } };
     let canvas = null, formato = 'vertical';
     const gerar = async () => { $('#cv').innerHTML = '<p class="carregando">Gerando cartão…</p>'; canvas = await desenharCartao(r, url, formato); canvas.className = 'cartao-img ' + formato; canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', 'Cartão do perfil: ' + cl.nome); $('#cv').replaceChildren(canvas); };
